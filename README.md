@@ -3,7 +3,7 @@ First Stage: Binary variables
 
 Second Stage: One binary variable and continuous variables
 
-# Code
+# Solution Methods
 IL_V1: Only using integer L-shaped cuts and solving each scenario subproblem as a MIP.
 
 IL_V2: Only using integer L-shaped cuts and solving each scenario subproblem as 2LPs.
