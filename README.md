@@ -1,1 +1,1 @@
-# 2SSMIP_1BV
+# Two-Stage Stochastic Mixed Integer Program
