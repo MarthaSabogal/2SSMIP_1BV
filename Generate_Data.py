@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import time
 
-
 #%% Sets
 sets_df = pd.read_excel('Data.xlsx', sheet_name='sets')  
 
@@ -25,10 +24,24 @@ int_arcs = [(j,k) for j in Jbar for k in K if k!=j]                    # interna
 
 #%% Deterministic Data 
 
-N = 400                      # number of scenarios
-#gbar = 337262 + 1953823     # nominal global production
-#r = 0.65                    # threshold for geopolitical strain 
-                
+N = 500                      # number of scenarios
+se = 505                     # seed
+
+def nominalpn():           # from nominal model
+    return 337784
+
+def rthreshold():
+    return 0.95
+
+def Nvalue():
+    return N
+
+def seedvalue():
+    return se
+
+def objnm():
+    return 1701923
+ 
 # Common Hazards Set
 Hk_df = pd.read_excel('Data.xlsx', sheet_name='H_k')     
 Hk = {}
@@ -80,8 +93,6 @@ c_tau = {}
 for (j,jprime) in plant_arcs:
     c_tau[j,jprime] = c_v[j,jprime]
     
-
-
 # Distributions parameters
 # demand parameters (mean and stv of normal dist)
 demand = client_df[['ISO','d_m','d_stv']].set_index('ISO').T.to_dict('list') 
@@ -100,102 +111,82 @@ gammaL2_df = gammaL2_df[['ISO']+cap_ava].set_index('ISO')
 gammaL3_df = pd.read_excel('Data.xlsx', sheet_name='L3') 
 gammaL3_df = gammaL3_df[['ISO']+cap_ava].set_index('ISO')  
 
-# Big M values
-#M1 = r*gbar                    # r*g 
-#M2 = 120000                    # capacity of plants 
-#M3 = sum(q_s[i] for i in I)
 #%% Stochastic Data
 # to build scenario set
-d, gamma_s, gamma_p, xi_qs, xi_qp, xi_nd = {}, {}, {}, {}, {}, {}
-U_cal, F_cal = {}, {}                                                  # origin and propagation of natural disasters (ND)
-Ubar_cal, Fbar_cal = {}, {}                                            # to model if manufacturing capacity is shut down
-Kbar, K_Kbar  = {}, {}                                                 # set of countries where: a ND occurred as origin, a ND did not occur as origin
-
-total_demand = np.zeros(N)
-others_prod = np.zeros(N)
-
-for w in range(N):  
-    Kbar[w] = []                        
-    K_Kbar[w] = []               
+def disruptions(I, J, K, N, psi, pr_shutdown, Hk, p_nd, p_qs, p_qp, se):  # Sampling, Random parameters
+    np.random.seed(se)              
+    xi_qs, xi_qp, xi_nd = {}, {}, {}    
+    U_cal, F_cal = {}, {}                                                  # origin and propagation of natural disasters (ND)
+    Kbar, K_Kbar  = {}, {}                                                 # set of countries where: a ND occurred as origin, a ND did not occur as origin
+    counter = {}
+    AUXSETK = {}
+    AUX = {}
     
-    for k in K:
-        d[k,w] = np.ceil(np.random.normal(demand[k][0], demand[k][1]))  # demand (mean,stv) 
-        if d[k,w] < 0:
-            d[k,w] = 0
-        total_demand[w] += d[k,w]
+    for w in range(N): 
+        Kbar[w] = []                        
+        K_Kbar[w] = []               
+        AUXSETK[w] = []
         
-        U_cal[k,w] = np.random.binomial(1,1-psi[k])                     # origin ND (if 0, then ND occurred)
-        if U_cal[k,w] == 0:
-            Kbar[w].append(k)
-            xi_nd[k,w] = np.random.binomial(1,1-pr_shutdown[k])         # shut down capacity?
-        else:
-            K_Kbar[w].append(k)
+        for k in K:
+            U_cal[k,w] = np.random.binomial(1,1-psi[k])                     # origin ND (if 0, then ND occurred)
+            if U_cal[k,w] == 0:                                             # origin ND 
+                Kbar[w].append(k)
+            else:
+                K_Kbar[w].append(k)                                         # No origin ND
+        
+        for k in Kbar[w]:
+            xi_nd[k,w] = np.random.binomial(1,1-pr_shutdown[k])             # shut down capacity?
             
-    for k in K_Kbar[w]:
-        counter = 0
-        for c in Hk[k]:
-            if c in Kbar[w]:
-                counter += 1                
-        if counter == 0:
-            xi_nd[k,w] = 1
-        
-        else:
-            AUX = set(Hk[k]).intersection(Kbar[w])                      # propagation of ND 
-            for kprime in AUX:
-                F_cal[k,kprime,w] = np.random.binomial(1,1-p_nd[k,kprime])   
-            if min(F_cal[k,kprime,w] for kprime in AUX) == 0:
-                xi_nd[k,w] = np.random.binomial(1,1-pr_shutdown[k])               
+        for k in K_Kbar[w]:
+            counter[k] = 0
+            for c in Hk[k]:
+                if c in Kbar[w]:
+                    counter[k] += 1                
+            if counter[k] == 0:
+                xi_nd[k,w] = 1
+            else:
+                AUXSETK[w].append(k)
+                
+        for k in AUXSETK[w]:
+            AUX[k] = sorted(set(Hk[k]).intersection(Kbar[w]))                      # propagation of ND 
+            for kprime in AUX[k]:
+                F_cal[k,kprime,w] = np.random.binomial(1,1-p_nd[k,kprime])
+            if min(F_cal[k,kprime,w] for kprime in AUX[k]) == 0:          
+                xi_nd[k,w] = np.random.binomial(1,1-pr_shutdown[k])                # shut down capacity?
             else: 
                 xi_nd[k,w] = 1
-         
-    for i in I:
-        xi_qs[i,w] = np.random.binomial(1, p_qs[i])                             # supplier, quality disruption
-        sprobabilities = [supplier_df2.loc[i, c] for c in cap_ava]              
-        gamma_s[i,w] = np.random.choice(cap_ava, 1, p=sprobabilities)[0]        # supplier, quality strains
-
-    for j in J:
-        L1_probabilities = [gammaL1_df.loc[j, c] for c in cap_ava]         
-        gamma_p[j,1,w] = np.random.choice(cap_ava, 1, p=L1_probabilities)[0]    # plants, quality strains
-      
-        L2_probabilities = [gammaL2_df.loc[j, c] for c in cap_ava]         
-        gamma_p[j,2,w] = np.random.choice(cap_ava, 1, p=L2_probabilities)[0]  
         
-        L3_probabilities = [gammaL3_df.loc[j, c] for c in cap_ava]         
-        gamma_p[j,3,w] = np.random.choice(cap_ava, 1, p=L3_probabilities)[0]  
-  
-        for l in L:
-            xi_qp[j,l,w] = np.random.binomial(1,p_qp[j,l])                      # plants, quality disruption
-
-    for k in K: 
-        others_prod[w] += eta[k]*xi_nd[k,w]
-
-#%%Store scenarios data
-# Code that store scenarios data, used to run all methods with the same sample in separate .py files
-
-dfdemand = pd.DataFrame(columns=["ISO","scenario","d"])
-dfdisaster = pd.DataFrame(columns=["ISO","scenario","xi_nd"])
-dfstrainsp = pd.DataFrame(columns=["ISO","quality","scenario","gamma_p"])
-dfqualityp = pd.DataFrame(columns=["ISO","quality","scenario","xi_qp"])
-dfstrainss = pd.DataFrame(columns=["ISO","scenario","gamma_s"])
-dfqualitys = pd.DataFrame(columns=["ISO","scenario","xi_qs"])
-
-for w in range(N):
-    for k in K:
-        dfdemand = pd.concat([dfdemand, pd.DataFrame.from_records([{"ISO":k,"scenario":w,"d":d[k,w]}])], ignore_index=True)
-        dfdisaster = pd.concat([dfdisaster, pd.DataFrame.from_records([{"ISO":k,"scenario":w,"xi_nd":xi_nd[k,w]}])], ignore_index=True)
-
-    for j in J:
-        for l in L:
-            dfstrainsp = pd.concat([dfstrainsp, pd.DataFrame.from_records([{"ISO":j,"quality":l,"scenario":w,"gamma_p":gamma_p[j,l,w]}])], ignore_index=True)
-            dfqualityp = pd.concat([dfqualityp, pd.DataFrame.from_records([{"ISO":j,"quality":l,"scenario":w,"xi_qp":xi_qp[j,l,w]}])], ignore_index=True)
+        for i in I:
+            xi_qs[i,w] = np.random.binomial(1, p_qs[i])                             # supplier, quality disruption
     
-    for i in I:
-        dfstrainss = pd.concat([dfstrainss, pd.DataFrame.from_records([{"ISO":i,"scenario":w,"gamma_s":gamma_s[i,w]}])], ignore_index=True)
-        dfqualitys = pd.concat([dfqualitys, pd.DataFrame.from_records([{"ISO":i,"scenario":w,"xi_qs":xi_qs[i,w]}])], ignore_index=True)
+        for j in J:
+            for l in L:
+                xi_qp[j,l,w] = np.random.binomial(1,p_qp[j,l])                      # plants, quality disruption   
+            
+    return xi_qs, xi_qp, xi_nd 
 
-dfdemand.to_csv("demand",index=False)
-dfdisaster.to_csv("disaster",index=False)
-dfstrainsp.to_csv("strainsp",index=False)
-dfqualityp.to_csv("qualityp",index=False)
-dfstrainss.to_csv("strainss",index=False)
-dfqualitys.to_csv("qualitys",index=False)
+def oper_strains(I, J, K, N, demand, supplier_df2, cap_ava, gammaL1_df, gammaL2_df, gammaL3_df, se):  # Sampling, Random parameters
+    np.random.seed(se)              
+    d, gamma_s, gamma_p = {}, {}, {}
+
+    for w in range(N):  
+        for k in K:
+            d[k,w] = np.ceil(np.random.normal(demand[k][0], demand[k][1]))  # demand (mean,stv) 
+            if d[k,w] < 0:
+                d[k,w] = 0
+             
+        for i in I:
+            sprobabilities = [supplier_df2.loc[i, c] for c in cap_ava]              
+            gamma_s[i,w] = np.random.choice(cap_ava, 1, p=sprobabilities)[0]        # supplier, quality strains
+    
+        for j in J:
+            L1_probabilities = [gammaL1_df.loc[j, c] for c in cap_ava]         
+            gamma_p[j,1,w] = np.random.choice(cap_ava, 1, p=L1_probabilities)[0]    # plants, quality strains
+          
+            L2_probabilities = [gammaL2_df.loc[j, c] for c in cap_ava]         
+            gamma_p[j,2,w] = np.random.choice(cap_ava, 1, p=L2_probabilities)[0]  
+            
+            L3_probabilities = [gammaL3_df.loc[j, c] for c in cap_ava]         
+            gamma_p[j,3,w] = np.random.choice(cap_ava, 1, p=L3_probabilities)[0]  
+            
+    return d, gamma_s, gamma_p

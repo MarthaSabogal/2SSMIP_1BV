@@ -9,6 +9,7 @@ from gurobipy import GRB
 import numpy as np
 import pandas as pd
 import time
+import Generate_Data
 
 #%% Sets
 sets_df = pd.read_excel('Data.xlsx', sheet_name='sets')  
@@ -24,10 +25,11 @@ plant_arcs = [(j,jprime) for j in J for jprime in J if jprime != j]    # arcs be
 int_arcs = [(j,k) for j in Jbar for k in K if k!=j]                    # international arcs affected by export bans (j=k is not here) 
 
 #%% Deterministic Data 
-
-N = 50                      # number of scenarios
-gbar = 337262 + 1953823     # nominal global production  
-r = 0.95                    # threshold for geopolitical strain 
+N = Generate_Data.Nvalue()                           # number of scenarios
+nv = Generate_Data.nominalpn()                       # nominal company production  
+gbar = nv + 1953823                                  # nominal global production  
+r = Generate_Data.rthreshold()                       # threshold for geopolitical strain 
+se = Generate_Data.seedvalue()                       # seed     
 
 # Common Hazards Set
 Hk_df = pd.read_excel('Data.xlsx', sheet_name='H_k')     
@@ -102,40 +104,20 @@ gammaL3_df = gammaL3_df[['ISO']+cap_ava].set_index('ISO')
 M1 = r*gbar                     # r*g 
 M2 = 120000                     # capacity of plants 
 M3 = sum(q_s[i] for i in I)     # total suppliers capacity
-#%%Read scenarios from stored data 
-
+#%% Stochastic Data 
 d, gamma_s, gamma_p, xi_qs, xi_qp, xi_nd = {}, {}, {}, {}, {}, {}
-
-demand = pd.read_csv('demand.csv')
-d_df = demand.set_index(['ISO','scenario'])    
-d = dict(zip(d_df.index, d_df.d)) 
- 
-disaster = pd.read_csv('disaster.csv')
-xidis_df = disaster.set_index(['ISO','scenario'])    
-xi_nd = dict(zip(xidis_df.index, xidis_df.xi_nd)) 
- 
-strainsp = pd.read_csv('strainsp.csv')
-gammap_df = strainsp.set_index(['ISO','quality','scenario'])    
-gamma_p = dict(zip(gammap_df.index, gammap_df.gamma_p))  
- 
-strainss = pd.read_csv('strainss.csv')
-gammas_df = strainss.set_index(['ISO','scenario'])    
-gamma_s = dict(zip(gammas_df.index, gammas_df.gamma_s))
-
-qualitys = pd.read_csv('qualitys.csv')
-xisq_df = qualitys.set_index(['ISO','scenario'])   
-xi_qs = dict(zip(xisq_df.index, xisq_df.xi_qs))
- 
-qualityp = pd.read_csv('qualityp.csv')
-xiqua_df = qualityp.set_index(['ISO','quality','scenario'])    
-xi_qp = dict(zip(xiqua_df.index, xiqua_df.xi_qp))  
-
+d, gamma_s, gamma_p = Generate_Data.oper_strains(I, J, K, N, demand, supplier_df2, cap_ava, gammaL1_df, gammaL2_df, gammaL3_df, se)
+xi_qs, xi_qp, xi_nd = Generate_Data.disruptions(I, J, K, N, psi, pr_shutdown, Hk, p_nd, p_qs, p_qp, se) 
+             
 total_demand = np.zeros(N)
 others_prod = np.zeros(N)
 for w in range(N):
     for k in K:
         total_demand[w] += d[k,w]
         others_prod[w] += eta[k]*xi_nd[k,w]
+        
+filename = f"gurobi_stats_EF_II_{se}_{int(r*100)}.txt"
+print(filename)
 
 #%% Extensive Form
 ini_time_EF = time.time()
@@ -205,6 +187,7 @@ for w in range(N):
 m_ef.update()
 m_ef.setParam("OutputFlag", 1)      
 m_ef.setParam('TimeLimit',3600)
+m_ef.setParam("Threads", 1)
 
 ini_time_OEF = time.time()
 m_ef.optimize()
@@ -230,10 +213,10 @@ nodes_explored = m_ef.NodeCount
 gap = m_ef.MIPGap                                               
 
 # Save the statistics and results
-with open("gurobi_statistics_EF.txt", "w") as file:
-    file.write("Scenarios,Method,Nodes Explored,Opt Time,Opt+Setup Time,Optimality Gap,Master Obj,Fixed Costs,2-Stage OF,r\n")
-    file.write(f"{N},EF,{nodes_explored},{timeOEF},{timeEF},{gap},{ZEF},{Fixed_costs},{Second_Stage_OF},{r}\n")
-
+with open(filename, "w") as file:
+    file.write("Scenarios,Method,Nodes,Opt Time,Opt+Setup Time,Gap,Master Obj,Fixed Costs,2-Stage OF,r,seed,status\n")
+    file.write(f"{N},EF_II,{nodes_explored},{timeOEF},{timeEF},{gap},{ZEF},{Fixed_costs},{Second_Stage_OF},{r},{se},{m_ef.status}\n")
+    
 print("Objective:", ZEF)
 print("Fixed Cost:", Fixed_costs) 
 print("2-Stage OF:", Second_Stage_OF)
@@ -312,9 +295,10 @@ if m_ef.status == GRB.OPTIMAL:
     for w in range(N):
         z_scenarios_df = pd.concat([z_scenarios_df, pd.DataFrame.from_records([{"Scenario":w,"z":z_efval[w]}])], ignore_index=True)
         globalpn_scenarios_df = pd.concat([globalpn_scenarios_df, pd.DataFrame.from_records([{"Scenario":w,"gp":global_pn[w], "actual z":z_real[w]}])], ignore_index=True) 
-        
+    
+    filename2 = f"Results_Disruption_Model_II_{se}_{int(r*100)}.xlsx"
     # Exporting results
-    with pd.ExcelWriter("Results_EF_Disruption_Model.xlsx") as writer:
+    with pd.ExcelWriter(filename2) as writer:
         v_df.to_excel(writer,"v")  
         u_df.to_excel(writer,"u")
         x_df.to_excel(writer,"x-e")
