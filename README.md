@@ -1,38 +1,28 @@
-# Two-Stage Stochastic Mixed Integer Program
-First Stage: Binary variables
+# Methods for Solving a Two-Stage Stochastic Mixed-Integer Program
+Problem/Application: Supply chain design under multiple disruption risks
 
-Second Stage: One binary variable and continuous variables
+First-Stage Model: Only binary variables
 
-# Solution Methods
-IL_V1: Only using integer L-shaped cuts and solving each scenario subproblem as a MIP.
+Second-Stage Model: One binary variable and continuous variables
 
-IL_V2: Only using integer L-shaped cuts and solving each scenario subproblem as 2LPs.
+# Cutting Plane Methods: Branch & Cut, Multicut
+Integer_Lshaped_Cut: Benders optimality cuts + integer L-shaped cuts
 
-AIL_V1: Alternating integer L-shaped cuts (Benders + integer L-shaped cuts) and solving each scenario subproblem as a MIP.
+Disjunctive_Cut: Benders optimality cuts + disjunctive cuts
+
+Bilinear_Cut_V1: Benders optimality cuts + bilinear cuts
+
+Bilinear_Cut_V2: Benders optimality cuts + bilinear cuts + feasibility cuts
+
+# Comparator
+Extensive_Form: Deterministic equivalent formulation
+
+# Data Files
+Data.xlsx and Generate_Data.py
 
 
-Reusing information from Benders
-
-AIL_V2: Alternating integer L-shaped cuts (Benders + integer L-shaped cuts) and solving each scenario subproblem as a MIP.
-
-AIL_V3: Alternating integer L-shaped cuts (Benders + integer L-shaped cuts) and solving each scenario subproblem as a MIP.
-
-AIL_V4: Alternating integer L-shaped cuts (Benders + integer L-shaped cuts) and solving each scenario subproblem as a MIP.
-
-AIL_V5: Alternating integer L-shaped cuts (Benders + integer L-shaped cuts) and solving each scenario subproblem as 2LPs.
 
 
-DC: Only using disjunctive cuts.
-
-ADC_V1: Alternating disjunctive cuts (Benders + disjunctive cuts).
-
-ADC_V2: Alternating disjunctive cuts (Benders + disjunctive cuts). Reusing information from Benders
-
-AILDC_V1: Benders + integer L-shaped + disjunctive cuts.
-
-AILDC_V2: Benders + integer L-shaped + disjunctive cuts. Reusing information from Benders
-
-BC: Only using bilinear cuts.
 
 
 
